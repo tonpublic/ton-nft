@@ -240,8 +240,22 @@ slice pack_std_addr(int wc, int addr) {
         return ();
     }
 
+    var data = load_data();
+    (int init?, int index, slice collection, _, _, _) = load_data();
     slice sender_address = cs~load_msg_addr();
-    (int wc, int addr) = parse_std_addr(sender_address);
+    if ~ init? {
+      if equal_slices(collection, sender_address) {
+        return store_data(index, collection, msg_body~load_msg_addr(), msg_body~load_msg_addr(), msg_body~load_ref());
+      } else {
+        ;; attempt to deploy from wrong address
+        var msg = begin_cell()
+          .store_uint(0x10, 6)
+          .store_slice(collection)
+          .store_grams(0)
+          .store_uint(0, 1 + 4 + 4 + 64 + 32 + 1);
+        return send_raw_message(msg.end_cell(), 32 + 128);
+      }
+    }
 
     int op = msg_body~load_uint(32);
 
