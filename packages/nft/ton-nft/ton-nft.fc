@@ -2,9 +2,17 @@
 ;;  TON NFT Smart Contract
 ;;
 
-(int) equal_slices (slice s1, slice s2) asm "SDEQ";
+int equal_slices (slice s1, slice s2) asm "SDEQ";
 int slice_null?(slice c) asm "ISNULL";
-;;
+
+int notification::ownership_transferred() asm "0x10 PUSHINT";
+int notification::ownership_assigned() asm "0x11 PUSHINT";
+int notification::ownership_withdrawn() asm "0x12 PUSHINT";
+int notification::content_updated() asm "0x13 PUSHINT";
+int notification::editorship_assigned() asm "0x14 PUSHINT";
+int notification::editorship_withdrawn() asm "0x15 PUSHINT";
+int notification::code_updated() asm "0x16 PUSHINT";
+
 ;;
 ;;  Storage
 ;;
@@ -170,10 +178,10 @@ slice pack_std_addr(int wc, int addr) {
     ;; TODO 20k is too much ??? 0.02 TON at current prices, 0.06+ notification fee total
     ;; TODO only basechain fees? smart-contract nft owners will be forced to be on basechain
     int amount =  gas_to_coins(0, 20000); ;;effectively allows handling up to 65m nfts
-    notify(collection, 10, amount,  query_id, owner, new_owner);
-    notify(new_owner, 11, amount, query_id, owner, null());
+    notify(collection, notification::ownership_transferred(), amount,  query_id, owner, new_owner);
+    notify(new_owner, notification::ownership_assigned(), amount, query_id, owner, null());
     if query_id {
-      notify(owner, 12, amount, query_id, null(), null());
+      notify(owner, notification::ownership_withdrawn(), amount, query_id, null(), null());
     } else { ;; send text
       notify_OK(owner);
     }
@@ -190,18 +198,18 @@ slice pack_std_addr(int wc, int addr) {
   int amount =  gas_to_coins(0, 20000);
   if op == 0 {
     content = payload~load_ref();
-    notify(editor, 13, amount, query_id, null(), null());
+    notify(editor, notification::content_updated(), amount, query_id, null(), null());
   }
   if op == 1 { ;; transfer editorship
     slice new_editor = payload~load_msg_addr();
-    notify(new_editor, 14, amount, query_id, editor, new_editor);
-    notify(editor, 15, amount, query_id, null(), null());
+    notify(new_editor, notification::editorship_assigned(), amount, query_id, editor, new_editor);
+    notify(editor, notification::editorship_withdrawn(), amount, query_id, null(), null());
     editor = new_editor;
   }
   if op == 2 {
     cell new_code = payload~load_ref();
     set_code(new_code);
-    notify(editor, 16, amount, query_id, null(), null());
+    notify(editor, notification::code_updated(), amount, query_id, null(), null());
     if(payload.slice_refs() > 0) {
       slice post_process = payload~load_ref().begin_parse();
       set_c3(new_code.begin_parse().bless());
