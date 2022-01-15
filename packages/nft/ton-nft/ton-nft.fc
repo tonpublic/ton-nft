@@ -16,9 +16,7 @@ int notification::code_updated() asm "0x16 PUSHINT";
 ;;
 ;;  Storage
 ;;
-;;  uint1 inited
-;;  cell name
-;;  cell symbol
+;;  uint64 index
 ;;  MsgAddressInt creator
 ;;  MsgAddressInt collection
 ;;  MsgAddressInt owner
@@ -28,20 +26,19 @@ int notification::code_updated() asm "0x16 PUSHINT";
 
 _ load_data() impure {
     slice ds = get_data().begin_parse();
-    var res = (
-        ds~load_msg_addr(),           ;; collection
-        ds~load_msg_addr(),           ;; owner
-        ds~load_msg_addr(),           ;; editor
-        ds~load_ref()               ;; content
-    );
-    ds.end_parse();
-    return res;
+    var (index, collection) = (ds~load_uint(64),ds~load_msg_addr());
+    if(ds.slice_bits() > 0 ) {
+      return (-1, index, collection, ds~load_msg_addr(), ds~load_msg_addr(), ds~load_ref() );
+    } else {
+      return (0, index, collection, null(), null(), null());
+    }
 }
 
 () store_data(var ds) impure {
-    (slice collection, slice owner, slice editor, cell content) = ds;
+    (int index, slice collection, slice owner, slice editor, cell content) = ds;
     set_data(
         begin_cell()
+            .store_uint(index, 64)
             .store_slice(owner)
             .store_slice(editor)
             .store_slice(collection)
@@ -167,7 +164,7 @@ slice pack_std_addr(int wc, int addr) {
 }
 
 () transfer_ownership (slice sender, int query_id, slice new_owner) impure {
-    (slice collection, slice owner, slice editor, cell content) = load_data();
+    (int init, int index, slice collection, slice owner, slice editor, cell content) = load_data();
     throw_unless(401, equal_slices(sender, owner));
     ;; TODO 20k is too much ??? 0.02 TON at current prices, 0.06+ notification fee total
     ;; TODO only basechain fees? smart-contract nft owners will be forced to be on basechain
@@ -179,14 +176,14 @@ slice pack_std_addr(int wc, int addr) {
     } else { ;; send text
       notify_OK(owner);
     }
-    store_data(collection, new_owner, editor, content);
+    store_data(index, collection, new_owner, editor, content);
 }
 
 () after_code_upgrade(slice data, int query_id) impure {
 } 
 
 () edit (slice sender, int query_id, slice payload) impure {
-  (slice collection, slice owner, slice editor, cell content) = load_data();
+  (int init, int index, slice collection, slice owner, slice editor, cell content) = load_data();
   throw_unless(401, equal_slices(sender, editor));
   int op = payload~load_uint(8);
   int amount =  gas_to_coins(0, 20000);
@@ -211,7 +208,7 @@ slice pack_std_addr(int wc, int addr) {
       throw(0);
     }
   }
-  store_data(collection, owner, editor, content);
+  store_data(index, collection, owner, editor, content);
 }
 
 () handle_comment_message (slice msg_body, slice sender_address) impure {
@@ -270,20 +267,25 @@ slice pack_std_addr(int wc, int addr) {
 ;;
 
 cell get_name() method_id {
-	( _, _, _, cell content) = load_data();
+	(_, _, _, _, _, cell content) = load_data();
 	slice cs = content.begin_parse();
 	return cs~load_ref();
 }
 
 cell get_symbol() method_id {
-    ( _, _, _, cell content) = load_data();
+    (_, _, _, _, _, cell content) = load_data();
     slice cs = content.begin_parse();
     cs~load_ref();
     return cs~load_ref();
 }
 
+int get_index() method_id {
+    (_, int index, _, _, _, _) = load_data();
+    return index;
+}
+
 (int, int) get_collection() method_id {
-     (slice collection, _, _, _) = load_data();
+     (_, _, slice collection, _, _, _) = load_data();
      if collection.slice_bits() == 2 {
        return (0,0);
      }
@@ -291,17 +293,17 @@ cell get_symbol() method_id {
 }
 
 (int, int) get_owner() method_id {
-     (_, slice owner, _, _) = load_data();
+     (_, _, _, slice owner, _, _) = load_data();
      return owner.parse_std_addr();
 }
 
 cell get_content() method_id {
-     (_, _, _, cell content) = load_data();
+     (_, _, _, _, _, cell content) = load_data();
      return content;
 }
 
 (int, int) get_editor() method_id {
-     (_, _, slice editor, _) = load_data();
+     (_, _, _, _, slice editor, _) = load_data();
      if editor.slice_bits() == 2 {
        return (0,0);
      }
