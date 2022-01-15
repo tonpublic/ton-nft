@@ -11,10 +11,10 @@
 ;;  uint1 inited
 ;;  cell name
 ;;  cell symbol
-;;  addr_std$10 creator
-;;  addr_std$10 owner
+;;  MsgAddressInt creator
+;;  MsgAddressInt collection
+;;  MsgAddressInt owner
 ;;  cell content
-;;  uint32 seq
 ;;
 ;;
 
@@ -24,26 +24,26 @@ _ load_data() impure {
     var res = (
         ds~load_ref(),                ;; name
         ds~load_ref(),                ;; symbol
-        ds~load_msg_addr(),           ;; creator
+        ds~load_msg_addr(),           ;; editor
+        ds~load_msg_addr(),           ;; collection
         ds~load_msg_addr(),           ;; owner
-        ds~load_ref(),                ;; content
-        ds~load_uint(32)              ;; seq
+        ds~load_ref()               ;; content
     );
     ds.end_parse();
     return res;
 }
 
 () store_data(var ds) impure {
-    (cell name, cell symbol, slice creator, slice owner, cell content, int seq) = ds;
+    (cell name, cell symbol, slice editor, slice collection, slice owner, cell content) = ds;
     set_data(
         begin_cell()
             .store_uint(1, 1)
             .store_ref(name)
             .store_ref(symbol)
-            .store_slice(creator)
+            .store_slice(editor)
+            .store_slice(collection)
             .store_slice(owner)
             .store_ref(content)
-            .store_uint(seq, 32)
             .end_cell()
     );
 }
@@ -131,7 +131,7 @@ slice pack_std_addr(int wc, int addr) {
     throw_unless(400, command == 0x67696674546f3a);
     var (int destination_wc, int destination_address) = msg_body~parse_raw_text_address();
 
-    (cell name, cell symbol, slice creator, slice owner, cell content, int seq) = load_data();
+    (cell name, cell symbol, slice editor, slice collection, slice owner, cell content) = load_data();
 
     (int owner_wc, int owner_address) = parse_std_addr(owner);
     (int sender_wc, int sender_address) = parse_std_addr(sender_address);
@@ -148,7 +148,7 @@ slice pack_std_addr(int wc, int addr) {
     }
 
     var new_owner_address = pack_std_addr(destination_wc, destination_address);
-    store_data((name, symbol, creator, new_owner_address, content, seq));
+    store_data(name, symbol, editor, collection, new_owner_address, content);
 }
 
 () recv_internal(int smc_balance, int msg_value, cell msg, slice msg_body) {
@@ -179,21 +179,6 @@ slice pack_std_addr(int wc, int addr) {
 }
 
 () recv_external(slice in_msg) {
-    slice ds = get_data().begin_parse();
-
-    int inited = ds~load_uint(1);     ;; inited
-    var name = ds~load_ref();   ;; name
-    var symbol = ds~load_ref(); ;; symbol
-    var creator = ds~load_msg_addr(); ;; creator
-    var owner = ds~load_msg_addr(); ;; owner
-    var content = ds~load_ref(); ;; content
-    var seq = ds~load_uint(32); ;; seq
-
-    ds.end_parse();
-    throw_if(400, inited);
-    accept_message();
-    var res = (name, symbol, creator, owner, content, seq);
-    store_data(res);
 }
 
 ;;
@@ -210,28 +195,30 @@ cell get_symbol() method_id {
     return symbol;
 }
 
-(int, int) get_creator() method_id {
-     (_, _, slice creator, _, _, _) = load_data();
-     return creator.parse_std_addr();
+(int, int) get_editor() method_id {
+     (_, _, slice editor, _, _, _) = load_data();
+     return editor.parse_std_addr();
+}
+
+(int, int) get_collection() method_id {
+     (_, _, _, slice collection, _, _) = load_data();
+     return collection.parse_std_addr();
 }
 
 (int, int) get_owner() method_id {
-     (_, _, _, slice owner, _, _) = load_data();
+     (_, _, _, _, slice owner,  _) = load_data();
      return owner.parse_std_addr();
 }
 
 cell get_content() method_id {
-     (_, _, _, _, cell content, _) = load_data();
+     (_, _, _, _, _, cell content) = load_data();
      return content;
 }
 
-int seqno() method_id {
-     (_, _, _, _, _, int seq) = load_data();
-     return seq;
-}
-
+{- TODO
 (int, int) supported_interfaces() method_id {
     ;; 126808: BasicNFT
     ;; 81264: BasicIntrospection
     return (126808, 81264);
 }
+-}
