@@ -1,0 +1,185 @@
+;; NFT collection smart contract
+
+int notification::ownership_transferred() asm "0x10 PUSHINT";
+int deployment_op() asm "0xFF11 PUSHINT";
+int equal_slices (slice s1, slice s2) asm "SDEQ";
+
+;; storage scheme
+;; nft: 
+;; storage#_ seqno:uint32, collection_id:uint32 public_key:bits256
+;;           nfts:(HashmapE MsgAddressInt MsgAddressInt) ;; nft -> owner
+;;           owners: (HashmapE MsgAddressInt HashmapE(MsgAddressInt ^Cell)) owner -> (nft -> empty_cell)
+
+
+(int, int, int, cell, cell) load_data() inline {
+  var ds = get_data().begin_parse();
+  return  
+    (ds~load_uint(32), 
+     ds~load_uint(32), 
+     ds~load_uint(256), 
+     ds~load_dict(),
+     ds~load_dict());
+}
+
+() save_data(int seqno, int collection_id, int public_key, cell nfts, cell owners) impure inline {
+  set_data(begin_cell()
+    .store_uint(seqno, 32)
+    .store_uint(collection_id, 32)
+    .store_uint(public_key, 256)
+    .store_dict(nfts)
+    .store_dict(owners)
+    .end_cell());
+}
+
+() recv_internal(int msg_value, cell in_msg_cell, slice in_msg) impure {
+  var cs = in_msg_cell.begin_parse();
+  var flags = cs~load_uint(4);  ;; int_msg_info$0 ihr_disabled:Bool bounce:Bool bounced:Bool
+  if (flags & 1) {
+    ;; ignore all bounced messages
+    return ();
+  }
+  slice sender_address = cs~load_msg_addr();
+  if (in_msg.slice_bits() < 32) {
+    ;; ignore simple transfers
+    return ();
+  }
+  int op = in_msg~load_uint(32);
+  if (op != notification::ownership_transferred()) & (op != deployment_op()) {
+    ;; ignore all messages not related to NFT
+    ;; TODO is it good idea?
+    throw(350);
+  }
+  var (seqno, collection_id, public_key, nfts, owners) = load_data();
+  if (op == deployment_op()) {
+    throw_unless(349, equal_slices(sender_address,my_address()));
+    accept_message();
+    slice cs = in_msg~load_ref().begin_parse();
+    int nft_workchain = cs~load_int(8);
+    int nft_balance = cs~load_grams();
+    (cell state_init, cell body) = (cs~load_ref(), cs~load_ref());
+    slice sis = state_init.begin_parse();
+    throw_unless(348, sis.slice_refs() == 2);
+    (cell nft_code, cell nft_data) = (sis~load_ref(),sis~load_ref());
+    ;; We can chec nft_code here if necessary ??? TODO
+    slice nft_data_slice = nft_data.begin_parse();
+    slice nft_owner = nft_data_slice~load_msg_addr();
+    int nft_address_hash = cell_hash(state_init);
+    slice nft_address = begin_cell().store_uint(4, 3).store_int(nft_workchain, 8).store_uint(nft_address_hash, 256).end_cell().begin_parse();
+    var msg = begin_cell()
+      .store_uint(0x18, 6)
+      .store_slice(nft_address)
+      .store_grams(nft_balance)
+      .store_uint(4 + 2 + 1, 1 + 4 + 4 + 64 + 32 + 1 + 1 + 1)
+      .store_ref(state_init)
+      .store_ref(body);
+    send_raw_message(msg.end_cell(), 1);
+
+    (_, _, _, int found?) = nfts.pfxdict_get?(nft_address.slice_bits(), nft_address);
+    throw_if(347, found?);
+    (nfts, int success?) = nfts.pfxdict_set?(nft_address.slice_bits(), nft_address, nft_owner);
+		throw_unless(352, success?);
+		(_, _, slice owner_ind, int found?) = owners.pfxdict_get?(nft_owner.slice_bits(), nft_owner);
+		cell owner_index = null();
+		if (found?) {
+		  cell owner_index = owner_ind~load_dict();
+		}
+		(owner_index, success?) = owner_index.pfxdict_set?(nft_address.slice_bits(), nft_address,
+		                                                   begin_cell().end_cell().begin_parse());
+		throw_unless(355, success?);
+		(owners, success?) = owners.pfxdict_set?(nft_owner.slice_bits(), nft_owner,
+		                                         begin_cell()
+		                                           .store_dict(owner_index)
+		                                         .end_cell()
+		                                         .begin_parse());
+  }
+  else { ;; Transfer ownership
+		(_, _, _, int found?) = nfts.pfxdict_get?(sender_address.slice_bits(), sender_address);
+		throw_unless(351, found?);
+		accept_message();
+		
+		cs~skip_bits(64); ;; query_id
+		slice from = cs~load_msg_addr();
+		slice to = cs~load_msg_addr();
+		
+		(nfts, int success?) = nfts.pfxdict_set?(sender_address.slice_bits(), sender_address, to);
+		throw_unless(352, success?);
+		
+		(_, _, slice owner_ind, int found?) = owners.pfxdict_get?(from.slice_bits(), from);
+		throw_unless(353, found?);
+		cell owner_index = owner_ind~load_dict();
+		(owner_index, success?) = owner_index.pfxdict_delete?(sender_address.slice_bits(), sender_address);
+		throw_unless(354, success?);
+		(owners, success?) = owners.pfxdict_set?(from.slice_bits(), from,
+		                                         begin_cell()
+		                                           .store_dict(owner_index)
+		                                         .end_cell()
+		                                         .begin_parse());
+		(_, _, slice owner_ind, int found?) = owners.pfxdict_get?(to.slice_bits(), to);
+		cell owner_index = null();
+		if (found?) {
+		  cell owner_index = owner_ind~load_dict();
+		}
+		(owner_index, success?) = owner_index.pfxdict_set?(sender_address.slice_bits(), sender_address,
+		                                                   begin_cell().end_cell().begin_parse());
+		throw_unless(355, success?);
+		(owners, success?) = owners.pfxdict_set?(from.slice_bits(), from,
+		                                         begin_cell()
+		                                           .store_dict(owner_index)
+		                                         .end_cell()
+		                                         .begin_parse());
+  }
+  save_data(seqno, collection_id, public_key, nfts, owners);
+}
+
+() recv_external(slice in_msg) impure {
+  var signature = in_msg~load_bits(512);
+  var cs = in_msg;
+  var (collection_id, valid_until, msg_seqno) = (cs~load_uint(32), cs~load_uint(32), cs~load_uint(32));
+  throw_if(36, valid_until <= now());
+  var ds = get_data().begin_parse();
+  var (stored_seqno, stored_collection_id, public_key, nfts, owners) = load_data();
+  ds.end_parse();
+  throw_unless(33, msg_seqno == stored_seqno);
+  throw_unless(34, collection_id == stored_collection_id);
+  throw_unless(35, check_signature(slice_hash(in_msg), signature, public_key));
+  accept_message();
+  save_data(stored_seqno + 1, stored_collection_id, public_key, nfts, owners);
+  commit();
+  cs~touch();
+  int op = cs~load_uint(8);
+
+  if (op == 0) { ;; simple send
+    while (cs.slice_refs()) {
+      var mode = cs~load_uint(8);
+      send_raw_message(cs~load_ref(), mode);
+    }
+    return (); ;; have already saved the storage
+  }
+
+  if (op == 1) { ;; deploy new nft
+    var msg = begin_cell()
+      .store_uint(0x18, 6)
+      .store_slice(my_address())
+      .store_grams(1000000000)
+      .store_uint(0, 1 + 4 + 4 + 64 + 32 + 1)
+      .store_uint(deployment_op(), 32)
+      .store_ref(begin_cell().store_slice(cs).end_cell());
+    send_raw_message(msg.end_cell(), 3);
+  }
+}
+
+;; Get methods
+
+int seqno() method_id {
+  return get_data().begin_parse().preload_uint(32);
+}
+
+int get_subwallet_id() method_id {
+  return get_data().begin_parse().skip_bits(32).preload_uint(32);
+}
+
+int get_public_key() method_id {
+  var cs = get_data().begin_parse().skip_bits(64);
+  return cs.preload_uint(256);
+}
+
