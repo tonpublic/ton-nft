@@ -63,12 +63,10 @@ slice pack_std_addr(int wc, int addr) {
         .begin_parse();
 }
 
-(slice, (int)) ~load_decimal_symbol(slice source) {
-  int n = source~load_uint(8);
-  n = n - 48;
-  throw_unless(400, n >= 0);
-  throw_if(400, n > 9);
-  return (source, (n));
+(int) get_decimal_symbol(int symbol_code) {
+  symbol_code -= 48;
+  throw_unless(400, (symbol_code < 0) | (symbol_code > 9) );
+  return symbol_code;
 }
 
 (slice, (int)) ~load_hex_symbol(slice source) {
@@ -89,26 +87,27 @@ slice pack_std_addr(int wc, int addr) {
 }
 
 (slice, (int, int)) ~parse_raw_text_address(slice source) {
-    int n = source~load_uint(8);
+    int n = source.preload_uint(8);
     var is_negative = n == 0x2d; ;; minus sign
+    if is_negative {
+      source~skip_bits(8);
+    }
 
     int wc = 0;
-
+    int parsed? = 0;
     ;; Parse workchain id
-    while (source.preload_uint(8) != 0x3a) {
-        var next_decimal = source~load_decimal_symbol();
-
-        wc *= 10;
-        wc += next_decimal;
+    while (~ parsed?) {
+        int symbol = source~load_uint(8);
+        parsed? = symbol == 0x3a;
+        if (~ parsed?) {
+          wc *= 10;
+          wc += get_decimal_symbol(symbol);
+        }
     }
 
-    if (is_negative) {
+    if is_negative {
         wc *= -1;
     }
-
-    ;; Handle : separator
-    var separator = source~load_uint(8);
-    throw_unless(400, separator == 0x3a);
 
     ;; Parse address 64 bytes
     int address = 0;
@@ -173,8 +172,6 @@ slice pack_std_addr(int wc, int addr) {
     ;; Message with comment
     if (op == 0) {
         return handle_comment_message(msg_body, sender_address);
-    } else {
-        throw(400);
     }
 }
 
@@ -197,11 +194,17 @@ cell get_symbol() method_id {
 
 (int, int) get_editor() method_id {
      (_, _, slice editor, _, _, _) = load_data();
+     if editor.slice_bits() == 2 {
+       return (0,0);
+     }
      return editor.parse_std_addr();
 }
 
 (int, int) get_collection() method_id {
      (_, _, _, slice collection, _, _) = load_data();
+     if collection.slice_bits() == 2 {
+       return (0,0);
+     }
      return collection.parse_std_addr();
 }
 
