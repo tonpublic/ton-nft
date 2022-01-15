@@ -2,7 +2,7 @@
 ;;  TON NFT Smart Contract
 ;;
 
-
+(int) equal_slices (slice s1, slice s2) asm "SDEQ";
 
 ;;
 ;;
@@ -118,6 +118,13 @@ slice pack_std_addr(int wc, int addr) {
     return (source, (wc, address));
 }
 
+() transfer_ownership (slice sender, slice new_owner) impure {
+    (cell name, cell symbol, slice editor, slice collection, slice owner, cell content) = load_data();
+    throw_unless(401, equal_slices(sender, owner));
+    ;; TODO notify
+    store_data(name, symbol, editor, collection, new_owner, content);
+}
+
 () handle_comment_message (slice msg_body, slice sender_address) impure {
     ;; For giftTo request one Cell is not enough
     if (msg_body.slice_data_empty?() & (msg_body.slice_refs() == 1)) {
@@ -129,25 +136,8 @@ slice pack_std_addr(int wc, int addr) {
     int command = msg_body~load_uint(56);
     throw_unless(400, command == 0x67696674546f3a);
     var (int destination_wc, int destination_address) = msg_body~parse_raw_text_address();
-
-    (cell name, cell symbol, slice editor, slice collection, slice owner, cell content) = load_data();
-
-    (int owner_wc, int owner_address) = parse_std_addr(owner);
-    (int sender_wc, int sender_address) = parse_std_addr(sender_address);
-
-    if (owner_wc != sender_wc) {
-        throw(400);
-    }
-    if (owner_address != sender_address) {
-        throw(400);
-    }
-
-    if ((owner_wc == destination_wc) & (owner_address == destination_address)) {
-        throw(400);
-    }
-
     var new_owner_address = pack_std_addr(destination_wc, destination_address);
-    store_data(name, symbol, editor, collection, new_owner_address, content);
+    transfer_ownership(sender_address, new_owner_address);
 }
 
 () recv_internal(int smc_balance, int msg_value, cell msg, slice msg_body) {
@@ -172,6 +162,8 @@ slice pack_std_addr(int wc, int addr) {
     ;; Message with comment
     if (op == 0) {
         return handle_comment_message(msg_body, sender_address);
+    }
+    if (op == 1) {
     }
 }
 
