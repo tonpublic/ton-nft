@@ -118,11 +118,38 @@ slice pack_std_addr(int wc, int addr) {
     return (source, (wc, address));
 }
 
-() transfer_ownership (slice sender, slice new_owner, int query_id) impure {
+() transfer_ownership (slice sender, int query_id, slice new_owner) impure {
     (cell name, cell symbol, slice editor, slice collection, slice owner, cell content) = load_data();
     throw_unless(401, equal_slices(sender, owner));
     ;; TODO notify
     store_data(name, symbol, editor, collection, new_owner, content);
+}
+
+() after_code_upgrade(slice data, int query_id) impure {
+} 
+
+() edit (slice sender, int query_id, slice payload) impure {
+  (cell name, cell symbol, slice editor, slice collection, slice owner, cell content) = load_data();
+  throw_unless(401, equal_slices(sender, editor));
+  int op = payload~load_uint(8);
+  if op == 0 {
+    content = payload~load_ref();
+  }
+  if op == 1 {
+    editor = payload~load_msg_addr();
+    ;; TODO notify
+  }
+  if op == 2 {
+    cell new_code = payload~load_ref();
+    set_code(new_code);
+    if(payload.slice_refs() > 0) {
+      slice post_process = payload~load_ref().begin_parse();
+      set_c3(new_code.begin_parse().bless());
+      after_code_upgrade(post_process, query_id);
+      throw(0);
+    }
+  }
+  store_data(name, symbol, editor, collection, owner, content);
 }
 
 () handle_comment_message (slice msg_body, slice sender_address) impure {
@@ -137,7 +164,7 @@ slice pack_std_addr(int wc, int addr) {
     throw_unless(400, command == 0x67696674546f3a);
     var (int destination_wc, int destination_address) = msg_body~parse_raw_text_address();
     var new_owner_address = pack_std_addr(destination_wc, destination_address);
-    return transfer_ownership(sender_address, new_owner_address, 0);
+    return transfer_ownership(sender_address, 0, new_owner_address);
 }
 
 () recv_internal(int smc_balance, int msg_value, cell msg, slice msg_body) {
@@ -163,10 +190,13 @@ slice pack_std_addr(int wc, int addr) {
     if (op == 0) {
         return handle_comment_message(msg_body, sender_address);
     }
+    int query_id = msg_body~load_uint(64);
     if (op == 1) { ;; transfer ownership
-      int query_id = msg_body~load_uint(64);
       slice new_owner = msg_body~load_msg_addr();
-      transfer_ownership(sender_address, new_owner, query_id);
+      transfer_ownership(sender_address, query_id, new_owner);
+    }
+    if (op == 2) { ;; edit
+      edit(sender_address, query_id, msg_body);
     }
 }
 
