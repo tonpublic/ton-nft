@@ -5,12 +5,9 @@
 int equal_slices (slice s1, slice s2) asm "SDEQ";
 int slice_null?(slice c) asm "ISNULL";
 
-int notification::ownership_transferred() asm "0x10 PUSHINT";
 int notification::ownership_assigned() asm "0x11 PUSHINT";
-int notification::ownership_withdrawn() asm "0x12 PUSHINT";
-int notification::content_updated() asm "0x13 PUSHINT";
 int notification::editorship_assigned() asm "0x14 PUSHINT";
-int notification::editorship_withdrawn() asm "0x15 PUSHINT";
+int notification::content_updated() asm "0x13 PUSHINT";
 int notification::code_updated() asm "0x16 PUSHINT";
 
 ;;
@@ -150,32 +147,13 @@ slice pack_std_addr(int wc, int addr) {
   return send_raw_message(msg.end_cell(), 1); ;; paying fees, revert on errors
 }
 
-() notify_OK (slice to) impure inline {
-  if to.preload_uint(2) == 0 { ;; addr_none: 00
-    return ();
-  }
-  ;; int_msg_info$0 ihr_disabled:Bool bounce:Bool bounced:Bool src:MsgAddress -> 011000
-  var msg = begin_cell()
-    .store_uint(0x10, 6) ;; nobounce
-    .store_slice(to)
-    .store_grams(0)
-    .store_uint(0x4f4b, 1 + 4 + 4 + 64 + 32 + 1 + 1 + 32 + 16);
-  return send_raw_message(msg.end_cell(), 1); ;; paying fees, revert on errors
-}
-
 () transfer_ownership (slice sender, int query_id, slice new_owner) impure {
     (int init, int index, slice collection, slice owner, slice editor, cell content) = load_data();
     throw_unless(401, equal_slices(sender, owner));
-    ;; TODO 20k is too much ??? 0.02 TON at current prices, 0.06+ notification fee total
+    ;; TODO 20k is too much ??? 0.02 TON at current prices
     ;; TODO only basechain fees? smart-contract nft owners will be forced to be on basechain
     int amount =  gas_to_coins(0, 20000); ;;effectively allows handling up to 65m nfts
-    notify(collection, notification::ownership_transferred(), amount,  query_id, owner, new_owner);
     notify(new_owner, notification::ownership_assigned(), amount, query_id, owner, null());
-    if query_id {
-      notify(owner, notification::ownership_withdrawn(), amount, query_id, null(), null());
-    } else { ;; send text
-      notify_OK(owner);
-    }
     store_data(index, collection, new_owner, editor, content);
 }
 
@@ -194,7 +172,6 @@ slice pack_std_addr(int wc, int addr) {
   if op == 1 { ;; transfer editorship
     slice new_editor = payload~load_msg_addr();
     notify(new_editor, notification::editorship_assigned(), amount, query_id, editor, new_editor);
-    notify(editor, notification::editorship_withdrawn(), amount, query_id, null(), null());
     editor = new_editor;
   }
   if op == 2 {
