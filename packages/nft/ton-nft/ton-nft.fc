@@ -32,9 +32,9 @@ _ load_data() impure {
     var res = (
         ds~load_ref(),                ;; name
         ds~load_ref(),                ;; symbol
+        ds~load_msg_addr(),           ;; owner
         ds~load_msg_addr(),           ;; editor
         ds~load_msg_addr(),           ;; collection
-        ds~load_msg_addr(),           ;; owner
         ds~load_ref()               ;; content
     );
     ds.end_parse();
@@ -45,12 +45,11 @@ _ load_data() impure {
     (cell name, cell symbol, slice editor, slice collection, slice owner, cell content) = ds;
     set_data(
         begin_cell()
-            .store_uint(1, 1)
             .store_ref(name)
             .store_ref(symbol)
+            .store_slice(owner)
             .store_slice(editor)
             .store_slice(collection)
-            .store_slice(owner)
             .store_ref(content)
             .end_cell()
     );
