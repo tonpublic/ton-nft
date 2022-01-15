@@ -3,7 +3,7 @@
 ;;
 
 (int) equal_slices (slice s1, slice s2) asm "SDEQ";
-
+int slice_null?(slice c) asm "ISNULL";
 ;;
 ;;
 ;;  Storage
@@ -46,6 +46,18 @@ _ load_data() impure {
             .store_ref(content)
             .end_cell()
     );
+}
+
+int gas_to_coins(int workchain, int gas) inline_ref {
+  int config_index = 21 + workchain;
+  var cs = config_param(config_index).begin_parse();
+  if (cs.preload_uint(8) == 0xd1) { ;; gas_flat_pfx
+    cs~skip_bits(8 + 64 + 64);
+  }
+  int tag = cs~load_uint(8);
+  throw_unless(71, (tag == 0xdd) | (tag == 0xde)); ;; gas_prices or gas_prices_ext
+  int gas_price = cs~load_uint(64);
+  return (gas * gas_price) >> 16;
 }
 
 ;;
@@ -118,10 +130,53 @@ slice pack_std_addr(int wc, int addr) {
     return (source, (wc, address));
 }
 
+() notify (slice to, int op, int amount, int query_id, slice data1, slice data2) impure inline {
+  if to.preload_uint(2) == 0 { ;; addr_none: 00
+    return ();
+  }
+  ;; int_msg_info$0 ihr_disabled:Bool bounce:Bool bounced:Bool src:MsgAddress -> 011000
+  var msg = begin_cell()
+    .store_uint(0x10, 6) ;; nobounce
+    .store_slice(to)
+    .store_grams(amount)
+    .store_uint(0, 1 + 4 + 4 + 64 + 32 + 1 + 1)
+    .store_uint(op, 32)
+    .store_uint(query_id, 64);
+  if (data1.slice_null?()) {
+    msg = msg.store_slice(data1);
+  }
+  if (data2.slice_null?()) {
+    msg = msg.store_slice(data2);
+  }
+  return send_raw_message(msg.end_cell(), 1); ;; paying fees, revert on errors
+}
+
+() notify_OK (slice to) impure inline {
+  if to.preload_uint(2) == 0 { ;; addr_none: 00
+    return ();
+  }
+  ;; int_msg_info$0 ihr_disabled:Bool bounce:Bool bounced:Bool src:MsgAddress -> 011000
+  var msg = begin_cell()
+    .store_uint(0x10, 6) ;; nobounce
+    .store_slice(to)
+    .store_grams(0)
+    .store_uint(0x4f4b, 1 + 4 + 4 + 64 + 32 + 1 + 1 + 32 + 16);
+  return send_raw_message(msg.end_cell(), 1); ;; paying fees, revert on errors
+}
+
 () transfer_ownership (slice sender, int query_id, slice new_owner) impure {
     (cell name, cell symbol, slice editor, slice collection, slice owner, cell content) = load_data();
     throw_unless(401, equal_slices(sender, owner));
-    ;; TODO notify
+    ;; TODO 20k is too much ??? 0.02 TON at current prices, 0.06+ notification fee total
+    ;; TODO only basechain fees? smart-contract nft owners will be forced to be on basechain
+    int amount =  gas_to_coins(0, 20000); ;;effectively allows handling up to 65m nfts
+    notify(collection, 10, amount,  query_id, owner, new_owner);
+    notify(new_owner, 11, amount, query_id, owner, null());
+    if query_id {
+      notify(owner, 12, amount, query_id, null(), null());
+    } else { ;; send text
+      notify_OK(owner);
+    }
     store_data(name, symbol, editor, collection, new_owner, content);
 }
 
@@ -132,16 +187,21 @@ slice pack_std_addr(int wc, int addr) {
   (cell name, cell symbol, slice editor, slice collection, slice owner, cell content) = load_data();
   throw_unless(401, equal_slices(sender, editor));
   int op = payload~load_uint(8);
+  int amount =  gas_to_coins(0, 20000);
   if op == 0 {
     content = payload~load_ref();
+    notify(editor, 13, amount, query_id, null(), null());
   }
-  if op == 1 {
-    editor = payload~load_msg_addr();
-    ;; TODO notify
+  if op == 1 { ;; transfer editorship
+    slice new_editor = payload~load_msg_addr();
+    notify(new_editor, 14, amount, query_id, editor, new_editor);
+    notify(editor, 15, amount, query_id, null(), null());
+    editor = new_editor;
   }
   if op == 2 {
     cell new_code = payload~load_ref();
     set_code(new_code);
+    notify(editor, 16, amount, query_id, null(), null());
     if(payload.slice_refs() > 0) {
       slice post_process = payload~load_ref().begin_parse();
       set_c3(new_code.begin_parse().bless());
@@ -193,10 +253,10 @@ slice pack_std_addr(int wc, int addr) {
     int query_id = msg_body~load_uint(64);
     if (op == 1) { ;; transfer ownership
       slice new_owner = msg_body~load_msg_addr();
-      transfer_ownership(sender_address, query_id, new_owner);
+      return transfer_ownership(sender_address, query_id, new_owner);
     }
     if (op == 2) { ;; edit
-      edit(sender_address, query_id, msg_body);
+      return edit(sender_address, query_id, msg_body);
     }
 }
 
