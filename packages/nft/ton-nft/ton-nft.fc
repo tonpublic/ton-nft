@@ -71,61 +71,6 @@ slice pack_std_addr(int wc, int addr) {
         .begin_parse();
 }
 
-(int) get_decimal_symbol(int symbol_code) {
-  symbol_code -= 48;
-  throw_unless(400, (symbol_code < 0) | (symbol_code > 9) );
-  return symbol_code;
-}
-
-(slice, (int)) ~load_hex_symbol(slice source) {
-    int n = source~load_uint(8);
-    n = n - 48;
-    throw_unless(400, n >= 0);
-    if (n < 10) {
-        return (source, (n));
-    }
-    n = n - 7;
-    throw_unless(400, n >= 0);
-    if (n < 16) {
-        return (source, (n));
-    }
-    n = n - 32;
-    throw_unless(400, (n >= 0) & (n < 16));
-    return (source, (n));
-}
-
-(slice, (int, int)) ~parse_raw_text_address(slice source) {
-    int n = source.preload_uint(8);
-    var is_negative = n == 0x2d; ;; minus sign
-    if is_negative {
-      source~skip_bits(8);
-    }
-
-    int wc = 0;
-    int parsed? = 0;
-    ;; Parse workchain id
-    while (~ parsed?) {
-        int symbol = source~load_uint(8);
-        parsed? = symbol == 0x3a;
-        if (~ parsed?) {
-          wc *= 10;
-          wc += get_decimal_symbol(symbol);
-        }
-    }
-
-    if is_negative {
-        wc *= -1;
-    }
-
-    ;; Parse address 64 bytes
-    int address = 0;
-    repeat (64) {
-        address = address * 16 + source~load_hex_symbol();
-    }
-
-    return (source, (wc, address));
-}
-
 () notify (slice to, int op, int amount, int query_id, slice data1, slice data2) impure inline {
   if to.preload_uint(2) == 0 { ;; addr_none: 00
     return ();
@@ -188,21 +133,6 @@ slice pack_std_addr(int wc, int addr) {
   store_data(index, collection, owner, editor, content);
 }
 
-() handle_comment_message (slice msg_body, slice sender_address) impure {
-    ;; For giftTo request one Cell is not enough
-    if (msg_body.slice_data_empty?() & (msg_body.slice_refs() == 1)) {
-      cell ref_msg = msg_body~load_ref();
-      msg_body = ref_msg.begin_parse();
-    }
-
-    ;; 'giftTo:'
-    int command = msg_body~load_uint(56);
-    throw_unless(400, command == 0x67696674546f3a);
-    var (int destination_wc, int destination_address) = msg_body~parse_raw_text_address();
-    var new_owner_address = pack_std_addr(destination_wc, destination_address);
-    return transfer_ownership(sender_address, 0, new_owner_address);
-}
-
 () recv_internal(int smc_balance, int msg_value, cell msg, slice msg_body) {
     if (msg_body.slice_empty?()) {
         ;; ignore empty messages
@@ -236,10 +166,6 @@ slice pack_std_addr(int wc, int addr) {
 
     int op = msg_body~load_uint(32);
 
-    ;; Message with comment
-    if (op == 0) {
-        return handle_comment_message(msg_body, sender_address);
-    }
     int query_id = msg_body~load_uint(64);
     if (op == 1) { ;; transfer ownership
       slice new_owner = msg_body~load_msg_addr();
