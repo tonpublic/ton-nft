@@ -14,9 +14,9 @@ int notification::code_updated() asm "0x16 PUSHINT";
 ;;  Storage
 ;;
 ;;  uint64 index
-;;  MsgAddressInt creator
 ;;  MsgAddressInt collection
 ;;  MsgAddressInt owner
+;;  MsgAddressInt editor
 ;;  cell content
 ;;
 ;;
@@ -42,33 +42,6 @@ _ load_data() impure {
             .store_ref(content)
             .end_cell()
     );
-}
-
-int gas_to_coins(int workchain, int gas) inline_ref {
-  int config_index = 21 + workchain;
-  var cs = config_param(config_index).begin_parse();
-  if (cs.preload_uint(8) == 0xd1) { ;; gas_flat_pfx
-    cs~skip_bits(8 + 64 + 64);
-  }
-  int tag = cs~load_uint(8);
-  throw_unless(71, (tag == 0xdd) | (tag == 0xde)); ;; gas_prices or gas_prices_ext
-  int gas_price = cs~load_uint(64);
-  return (gas * gas_price) >> 16;
-}
-
-;;
-;; Serializes
-;; addr_std$10 anycast:(Maybe Anycast) workchain_id:int8 address:bits256 = MsgAddressInt;
-;; output is 267 bits
-;;
-slice pack_std_addr(int wc, int addr) {
-    return begin_cell()
-        .store_uint(2, 2)
-        .store_uint(0, 1)
-        .store_int(wc, 8)
-        .store_uint(addr, 256)
-        .end_cell()
-        .begin_parse();
 }
 
 () notify (slice to, int op, int amount, int query_id, slice data1, slice payload) impure inline {
@@ -111,7 +84,6 @@ slice pack_std_addr(int wc, int addr) {
   (int init, int index, slice collection, slice owner, slice editor, cell content) = load_data();
   throw_unless(401, equal_slices(sender, editor));
   int op = msg_body~load_uint(8);
-  int amount =  gas_to_coins(0, 20000);
   if op == 0 {
     content = msg_body~load_ref();
   }

@@ -144,6 +144,10 @@ cell member_content(int index, cell individual_content) method_id {
     return individual_content;
 }
 
+((int,int), slice) royalty_params() method_id {
+    return ((1,100), my_balance());
+}
+
 {-
   slice member_uri() method_id {
   }
