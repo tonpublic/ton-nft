@@ -270,35 +270,17 @@ cell get_symbol() method_id {
     return cs~load_ref();
 }
 
-int get_index() method_id {
-    (_, int index, _, _, _, _) = load_data();
-    return index;
+(int, int) parse_std_none_addr(slice addr) {
+  if(addr.slice_bits() == 2) {
+    return (-2,-2);
+  } else {
+    return addr.parse_std_addr();
+  }
 }
 
-(int, int) get_collection() method_id {
-     (_, _, slice collection, _, _, _) = load_data();
-     if collection.slice_bits() == 2 {
-       return (0,0);
-     }
-     return collection.parse_std_addr();
-}
-
-(int, int) get_owner() method_id {
-     (_, _, _, slice owner, _, _) = load_data();
-     return owner.parse_std_addr();
-}
-
-cell get_content() method_id {
-     (_, _, _, _, _, cell content) = load_data();
-     return content;
-}
-
-(int, int) get_editor() method_id {
-     (_, _, _, _, slice editor, _) = load_data();
-     if editor.slice_bits() == 2 {
-       return (0,0);
-     }
-     return editor.parse_std_addr();
+_ get_nft_data() method_id {
+  (_, int index, slice collection, slice owner, slice editor, cell content) = load_data();
+  return (index, parse_std_none_addr(collection), parse_std_none_addr(owner), parse_std_none_addr(editor), content);
 }
 
 {- TODO
