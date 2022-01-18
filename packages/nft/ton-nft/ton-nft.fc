@@ -71,7 +71,7 @@ slice pack_std_addr(int wc, int addr) {
         .begin_parse();
 }
 
-() notify (slice to, int op, int amount, int query_id, slice data1, slice data2) impure inline {
+() notify (slice to, int op, int amount, int query_id, slice data1, slice payload) impure inline {
   if to.preload_uint(2) == 0 { ;; addr_none: 00
     return ();
   }
@@ -86,45 +86,49 @@ slice pack_std_addr(int wc, int addr) {
   if (data1.slice_null?()) {
     msg = msg.store_slice(data1);
   }
-  if (data2.slice_null?()) {
-    msg = msg.store_slice(data2);
+  if (payload.slice_null?()) {
+    msg = msg.store_slice(payload);
   }
   return send_raw_message(msg.end_cell(), 1); ;; paying fees, revert on errors
 }
 
-() transfer_ownership (slice sender, int query_id, slice new_owner) impure {
+() transfer_ownership (slice sender, int query_id, slice msg_body) impure {
+    slice new_owner = msg_body~load_msg_addr();
     (int init, int index, slice collection, slice owner, slice editor, cell content) = load_data();
     throw_unless(401, equal_slices(sender, owner));
-    ;; TODO 20k is too much ??? 0.02 TON at current prices
-    ;; TODO only basechain fees? smart-contract nft owners will be forced to be on basechain
-    int amount =  gas_to_coins(0, 20000); ;;effectively allows handling up to 65m nfts
-    notify(new_owner, notification::ownership_assigned(), amount, query_id, owner, null());
     store_data(index, collection, new_owner, editor, content);
+    int forward_amount = msg_body~load_grams();
+    slice payload = msg_body;
+    if forward_amount {
+      notify(new_owner, notification::ownership_assigned(), forward_amount, query_id, owner, payload);
+    }
 }
 
 () after_code_upgrade(slice data, int query_id) impure {
 } 
 
-() edit (slice sender, int query_id, slice payload) impure {
+() edit (slice sender, int query_id, slice msg_body) impure {
   (int init, int index, slice collection, slice owner, slice editor, cell content) = load_data();
   throw_unless(401, equal_slices(sender, editor));
-  int op = payload~load_uint(8);
+  int op = msg_body~load_uint(8);
   int amount =  gas_to_coins(0, 20000);
   if op == 0 {
-    content = payload~load_ref();
-    notify(editor, notification::content_updated(), amount, query_id, null(), null());
+    content = msg_body~load_ref();
   }
   if op == 1 { ;; transfer editorship
-    slice new_editor = payload~load_msg_addr();
-    notify(new_editor, notification::editorship_assigned(), amount, query_id, editor, new_editor);
+    slice new_editor = msg_body~load_msg_addr();
+    int forward_amount = msg_body~load_grams();
+    slice payload = msg_body;
+    if forward_amount {
+      notify(new_editor, notification::ownership_assigned(), forward_amount, query_id, editor, payload);
+    }
     editor = new_editor;
   }
   if op == 2 {
-    cell new_code = payload~load_ref();
+    cell new_code = msg_body~load_ref();
     set_code(new_code);
-    notify(editor, notification::code_updated(), amount, query_id, null(), null());
-    if(payload.slice_refs() > 0) {
-      slice post_process = payload~load_ref().begin_parse();
+    if(msg_body.slice_refs() > 0) {
+      slice post_process = msg_body~load_ref().begin_parse();
       set_c3(new_code.begin_parse().bless());
       after_code_upgrade(post_process, query_id);
       throw(0);
@@ -168,8 +172,7 @@ slice pack_std_addr(int wc, int addr) {
 
     int query_id = msg_body~load_uint(64);
     if (op == 1) { ;; transfer ownership
-      slice new_owner = msg_body~load_msg_addr();
-      return transfer_ownership(sender_address, query_id, new_owner);
+      return transfer_ownership(sender_address, query_id, msg_body);
     }
     if (op == 2) { ;; edit
       return edit(sender_address, query_id, msg_body);
