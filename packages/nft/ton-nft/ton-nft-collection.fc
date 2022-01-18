@@ -6,24 +6,26 @@ int equal_slices (slice s1, slice s2) asm "SDEQ";
 
 ;; storage scheme 
 ;; storage#_ seqno:uint32 collection_id:uint32 public_key:bits256
-;;           next_index:uint64 nft_code:^Cell = Storage;
+;;           next_index:uint64 common_content:^Cell nft_code:^Cell = Storage;
 
-(int, int, int, int, cell) load_data() inline {
+(int, int, int, int, cell, cell) load_data() inline {
   var ds = get_data().begin_parse();
   return  
     (ds~load_uint(32), 
      ds~load_uint(32), 
      ds~load_uint(256), 
      ds~load_uint(64),
+     ds~load_ref(),
      ds~load_ref());
 }
 
-() save_data(int seqno, int collection_id, int public_key, int next_index, cell code) impure inline {
+() save_data(int seqno, int collection_id, int public_key, int next_index, cell content, cell code) impure inline {
   set_data(begin_cell()
     .store_uint(seqno, 32)
     .store_uint(collection_id, 32)
     .store_uint(public_key, 256)
     .store_uint(next_index, 64)
+    .store_ref(content)
     .store_ref(code)
     .end_cell());
 }
@@ -41,6 +43,10 @@ slice calculate_nft_address (int workchain, cell init_data) {
                      .begin_parse();
 }
 
+
+() after_code_upgrade(slice data) impure {
+} 
+
 () recv_internal(int msg_value, cell in_msg_cell, slice in_msg) impure {
 }
 
@@ -50,14 +56,14 @@ slice calculate_nft_address (int workchain, cell init_data) {
   var (collection_id, valid_until, msg_seqno) = (cs~load_uint(32), cs~load_uint(32), cs~load_uint(32));
   throw_if(36, valid_until <= now());
   var ds = get_data().begin_parse();
-  var (stored_seqno, stored_collection_id, public_key, next_index, code) = load_data();
+  var (stored_seqno, stored_collection_id, public_key, next_index, common_content, code) = load_data();
   ds.end_parse();
   throw_unless(33, msg_seqno == stored_seqno);
   throw_unless(34, collection_id == stored_collection_id);
   throw_unless(35, check_signature(slice_hash(in_msg), signature, public_key));
   accept_message();
   stored_seqno += 1;
-  save_data(stored_seqno, stored_collection_id, public_key, next_index, code);
+  save_data(stored_seqno, stored_collection_id, public_key, next_index, common_content, code);
   commit();
   cs~touch();
   int op = cs~load_uint(8);
@@ -84,8 +90,22 @@ slice calculate_nft_address (int workchain, cell init_data) {
       .store_slice(cs);
     send_raw_message(msg.end_cell(), 3);
     next_index += 1;
-    save_data(stored_seqno, stored_collection_id, public_key, next_index, code);
+    save_data(stored_seqno, stored_collection_id, public_key, next_index, common_content, code);
     return();
+  }
+  if (op == 2) { ;; update nft_code
+    cell new_code = cs~load_ref();
+    set_code(new_code);
+    if(cs.slice_refs() > 0) {
+      slice post_process = cs~load_ref().begin_parse();
+      set_c3(new_code.begin_parse().bless());
+      after_code_upgrade(post_process);
+      throw(0);
+    }
+  }
+  if (op == 3) { ;; update nft_storage
+    cell new_storage = cs~load_ref();
+    set_data(new_storage);
   }
 }
 
@@ -110,15 +130,13 @@ int get_next_index() method_id {
 }
 
 slice get_nft_address_by_index(index) method_id {
-    var (stored_seqno, stored_collection_id, public_key, next_index, code) = load_data();
+    (_, _, _, _, _, cell code) = load_data();
     cell state_init = calculate_nft_state_init(index, code);
     return calculate_nft_address(0, state_init);
 }
 
 (int, int) get_std_nft_address_by_index(int index) method_id {
-    var (stored_seqno, stored_collection_id, public_key, next_index, code) = load_data();
-    cell state_init = calculate_nft_state_init(index, code);
-    return parse_std_addr(calculate_nft_address(0, state_init));
+    return parse_std_addr(get_nft_address_by_index(index));
 }
 
 cell member_content(int index, cell individual_content) method_id {
