@@ -205,8 +205,8 @@ cell get_symbol() method_id {
 }
 
 _ get_nft_data() method_id {
-  (_, int index, slice collection, slice owner, slice editor, cell content) = load_data();
-  return (index, parse_std_none_addr(collection), parse_std_none_addr(owner), parse_std_none_addr(editor), content);
+  (_, int index, slice collection, slice owner, slice editor, cell individual_content) = load_data();
+  return (index, parse_std_none_addr(collection), parse_std_none_addr(owner), parse_std_none_addr(editor), individual_content);
 }
 
 {- TODO

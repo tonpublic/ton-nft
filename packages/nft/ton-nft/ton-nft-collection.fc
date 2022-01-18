@@ -120,3 +120,13 @@ slice get_nft_address_by_index(index) method_id {
     cell state_init = calculate_nft_state_init(index, code);
     return parse_std_addr(calculate_nft_address(0, state_init));
 }
+
+cell member_content(int index, cell individual_content) method_id {
+    ;; Redefine for collection for storing common part one time
+    return individual_content;
+}
+
+{-
+  slice member_uri() method_id {
+  }
+-}
