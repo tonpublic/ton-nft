@@ -36,9 +36,9 @@ _ load_data() impure {
     set_data(
         begin_cell()
             .store_uint(index, 64)
+            .store_slice(collection)
             .store_slice(owner)
             .store_slice(editor)
-            .store_slice(collection)
             .store_ref(content)
             .end_cell()
     );
@@ -158,6 +158,14 @@ _ load_data() impure {
 ;;  GET Methods
 ;;
 
+{-
+  Optional methods
+    get_name
+    get_symbol
+    uri
+-}
+
+;; maybe absent
 cell get_name() method_id {
 	(_, _, _, _, _, cell content) = load_data();
 	slice cs = content.begin_parse();
@@ -185,9 +193,9 @@ _ get_nft_data() method_id {
 }
 
 {- TODO
-(int, int) supported_interfaces() method_id {
-    ;; 126808: BasicNFT
-    ;; 81264: BasicIntrospection
-    return (126808, 81264);
-}
+  (int, int) supported_interfaces() method_id {
+      ;; 126808: BasicNFT
+      ;; 81264: BasicIntrospection
+      return (126808, 81264);
+  }
 -}

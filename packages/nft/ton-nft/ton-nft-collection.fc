@@ -55,9 +55,7 @@ slice calculate_nft_address (int workchain, cell init_data) {
   var cs = in_msg;
   var (collection_id, valid_until, msg_seqno) = (cs~load_uint(32), cs~load_uint(32), cs~load_uint(32));
   throw_if(36, valid_until <= now());
-  var ds = get_data().begin_parse();
   var (stored_seqno, stored_collection_id, public_key, next_index, common_content, code) = load_data();
-  ds.end_parse();
   throw_unless(33, msg_seqno == stored_seqno);
   throw_unless(34, collection_id == stored_collection_id);
   throw_unless(35, check_signature(slice_hash(in_msg), signature, public_key));
@@ -87,7 +85,7 @@ slice calculate_nft_address (int workchain, cell init_data) {
       .store_grams(cs~load_grams())
       .store_uint(4 + 2 + 1, 1 + 4 + 4 + 64 + 32 + 1 + 1 + 1)
       .store_ref(state_init)
-      .store_slice(cs);
+      .store_ref(cs~load_ref());
     send_raw_message(msg.end_cell(), 3);
     next_index += 1;
     save_data(stored_seqno, stored_collection_id, public_key, next_index, common_content, code);
@@ -145,7 +143,7 @@ cell member_content(int index, cell individual_content) method_id {
 }
 
 ((int,int), slice) royalty_params() method_id {
-    return ((1,100), my_balance());
+    return ((1,100), my_address());
 }
 
 {-
